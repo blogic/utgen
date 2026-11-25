@@ -1,0 +1,284 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: GPL-2.0-only
+     Copyright (C) 2026 John Crispin <john@phrozen.org> -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>traffic generator</title>
+<style>
+  :root {
+    --bg: #11141a; --panel: #181c24; --line: #262c38;
+    --text: #d8dee9; --dim: #7d8899; --accent: #7aa2f7;
+    --ok: #9ece6a; --warn: #e0af68; --bad: #f7768e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px; background: var(--bg); color: var(--text);
+    font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  header { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+  h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: 0.02em; }
+  .meta { color: var(--dim); font-size: 12px; }
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  h2 {
+    font-size: 12px; margin: 0; padding: 8px 12px; color: var(--dim);
+    text-transform: uppercase; letter-spacing: 0.08em;
+    border-bottom: 1px solid var(--line); font-weight: 600;
+  }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 5px 12px; white-space: nowrap; }
+  th { color: var(--dim); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+  tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .up { color: var(--ok); } .down { color: var(--dim); }
+  .held { color: var(--warn); } .fail { color: var(--bad); }
+  .empty { padding: 10px 12px; color: var(--dim); }
+  pre {
+    margin: 0; padding: 10px 12px; max-height: 420px; overflow: auto;
+    font-size: 12px; line-height: 1.45; white-space: pre-wrap; word-break: break-word;
+  }
+  .wide { grid-column: 1 / -1; }
+  label { color: var(--dim); font-size: 12px; }
+  select, button {
+    background: var(--bg); color: var(--text); border: 1px solid var(--line);
+    border-radius: 4px; padding: 3px 7px; font: inherit; font-size: 12px;
+  }
+  button { cursor: pointer; }
+  #err { color: var(--bad); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>traffic generator</h1>
+  <span class="meta">mcp <span id="mcp">-</span></span>
+  <span class="meta">config <span id="config">-</span></span>
+  <span class="meta" id="stamp">-</span>
+  <span class="meta" id="err"></span>
+</header>
+
+<div class="grid">
+  <section>
+    <h2>Ports</h2>
+    <div id="ports"></div>
+  </section>
+
+  <section>
+    <h2>Leases</h2>
+    <div id="leases"></div>
+  </section>
+
+  <section>
+    <h2>Endpoints</h2>
+    <div id="endpoints"></div>
+  </section>
+
+  <section>
+    <h2>Captures and echo services</h2>
+    <div id="services"></div>
+  </section>
+
+  <section class="wide">
+    <h2>Runs</h2>
+    <div id="runs"></div>
+  </section>
+
+  <section class="wide">
+    <h2>
+      Log
+      <label style="float:right;font-weight:400;text-transform:none;letter-spacing:0">
+        lines
+        <select id="lines">
+          <option>40</option><option selected>80</option><option>200</option><option>500</option>
+        </select>
+      </label>
+    </h2>
+    <pre id="log">loading</pre>
+  </section>
+</div>
+
+<script>
+"use strict";
+
+const REFRESH_MS = 3000;
+
+function text(value, fallback) {
+  if (value === null || value === undefined || value === "") return fallback || "-";
+  return String(value);
+}
+
+function table(columns, rows, emptyMessage) {
+  if (!rows.length) {
+    const div = document.createElement("div");
+    div.className = "empty";
+    div.textContent = emptyMessage;
+    return div;
+  }
+  const el = document.createElement("table");
+  const head = el.createTHead().insertRow();
+  for (const column of columns) {
+    const th = document.createElement("th");
+    th.textContent = column.label;
+    head.appendChild(th);
+  }
+  const body = el.createTBody();
+  for (const row of rows) {
+    const tr = body.insertRow();
+    for (const column of columns) {
+      const td = tr.insertCell();
+      const cell = column.value(row);
+      // A column may return a class alongside its text, to colour a state.
+      if (cell && typeof cell === "object") {
+        td.textContent = cell.text;
+        if (cell.className) td.className = cell.className;
+      } else {
+        td.textContent = text(cell);
+      }
+      if (column.numeric) td.classList.add("num");
+    }
+  }
+  return el;
+}
+
+function render(id, element) {
+  const host = document.getElementById(id);
+  host.replaceChildren(element);
+}
+
+function speedCell(port) {
+  if (!port.carrier) return { text: "no carrier", className: "down" };
+  return { text: text(port.speed_mbps) + " Mbps", className: "up" };
+}
+
+function renderPorts(ports) {
+  render("ports", table([
+    { label: "port", value: p => p.label },
+    { label: "iface", value: p => p.iface },
+    { label: "link", value: speedCell },
+    { label: "max", value: p => text(p.max_speed_mbps) + " Mbps", numeric: true },
+    { label: "mtu", value: p => p.mtu, numeric: true },
+    { label: "claimed by", value: p => p.lease_owner
+        ? { text: p.lease_owner, className: "held" }
+        : { text: "free", className: "down" } },
+  ], ports, "no ports configured"));
+}
+
+function renderLeases(leases) {
+  render("leases", table([
+    { label: "owner", value: l => l.owner },
+    { label: "ports", value: l => (l.ports || []).join(" ") },
+    { label: "ttl left", value: l => text(l.ttl_remaining_s) + "s", numeric: true },
+    { label: "note", value: l => l.note },
+  ], leases, "no ports leased"));
+}
+
+function renderEndpoints(endpoints) {
+  const live = endpoints.filter(e => e.exists);
+  render("endpoints", table([
+    { label: "port", value: e => e.port },
+    { label: "dev", value: e => e.dev },
+    { label: "namespace", value: e => e.netns },
+    { label: "addresses", value: e => (e.addresses || []).join(" ") },
+    { label: "link", value: e => e.carrier
+        ? { text: text(e.speed_mbps) + " Mbps", className: "up" }
+        : { text: "no carrier", className: "down" } },
+  ], live, "no endpoints configured"));
+}
+
+function renderServices(captures, echoes) {
+  const rows = [
+    ...captures.map(c => ({
+      kind: "capture", id: c.capture_id, port: c.port, running: c.running,
+      detail: c.bpf + ", " + text(c.packets) + " packets",
+    })),
+    ...echoes.map(e => ({
+      kind: "echo", id: e.echo_id, port: e.port, running: e.running,
+      detail: "udp " + e.udp_port + "/tcp " + e.tcp_port + ", " + text(e.sources_seen) + " sources",
+    })),
+  ];
+  render("services", table([
+    { label: "kind", value: r => r.kind },
+    { label: "port", value: r => r.port },
+    { label: "state", value: r => r.running
+        ? { text: "running", className: "up" }
+        : { text: "stopped", className: "down" } },
+    { label: "detail", value: r => r.detail },
+    { label: "id", value: r => r.id },
+  ], rows, "none running"));
+}
+
+function runSummary(run) {
+  const s = run.summary;
+  if (!s) return run.error ? run.error.slice(0, 80) : "-";
+  if (s.tx_mpps !== undefined && s.tx_mpps !== null) {
+    return s.tx_mpps + " Mpps, loss " + text(s.loss_percent) + "%";
+  }
+  if (s.owd_mean_ms !== undefined) {
+    return "owd " + s.owd_mean_ms + " ms, p99 " + text(s.owd_p99_ms) + " ms, lost " + text(s.lost);
+  }
+  if (s.opened !== undefined) {
+    return s.opened + " flows, peak " + text(s.concurrent_peak) + ", reached " + text(s.reached_sink);
+  }
+  if (s.tx_mbps !== undefined && s.tx_mbps !== null) {
+    const loss = s.loss_percent !== undefined && s.loss_percent !== null
+      ? ", loss " + s.loss_percent + "%" : "";
+    const retx = s.retransmits !== undefined && s.retransmits !== null
+      ? ", retx " + s.retransmits : "";
+    return s.tx_mbps + " Mbps" + loss + retx;
+  }
+  return "-";
+}
+
+function renderRuns(runs) {
+  render("runs", table([
+    { label: "started", value: r => new Date(r.started_at * 1000).toLocaleTimeString() },
+    { label: "kind", value: r => r.kind },
+    { label: "path", value: r => text(r.params && r.params.src) + " to " + text(r.params && r.params.dst) },
+    { label: "status", value: r => {
+        const className = r.status === "done" ? "up"
+          : r.status === "running" ? "held"
+          : r.status === "failed" ? "fail" : "down";
+        return { text: r.status, className };
+      } },
+    { label: "duration", value: r => text(r.duration_s) + "s", numeric: true },
+    { label: "result", value: runSummary },
+    { label: "owner", value: r => r.owner },
+  ], runs, "no runs yet"));
+}
+
+async function refresh() {
+  const error = document.getElementById("err");
+  try {
+    const status = await (await fetch("/api/status", { cache: "no-store" })).json();
+    document.getElementById("mcp").textContent = text(status.mcp);
+    document.getElementById("config").textContent = text(status.config);
+    renderPorts(status.ports || []);
+    renderLeases(status.leases || []);
+    renderEndpoints(status.endpoints || []);
+    renderServices(status.captures || [], status.echoes || []);
+    renderRuns(status.runs || []);
+
+    const lines = document.getElementById("lines").value;
+    const log = await (await fetch("/api/logs?lines=" + lines, { cache: "no-store" })).json();
+    const pre = document.getElementById("log");
+    const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 24;
+    pre.textContent = (log.lines || []).join("\n") || "no log output";
+    // Only follow the tail if the reader had not scrolled up to look at something.
+    if (atBottom) pre.scrollTop = pre.scrollHeight;
+
+    document.getElementById("stamp").textContent = "updated " + new Date().toLocaleTimeString();
+    error.textContent = "";
+  } catch (problem) {
+    error.textContent = "cannot reach tgend: " + problem.message;
+  }
+}
+
+document.getElementById("lines").addEventListener("change", refresh);
+refresh();
+setInterval(refresh, REFRESH_MS);
+</script>
+
+</body>
+</html>

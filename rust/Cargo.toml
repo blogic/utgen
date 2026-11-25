@@ -1,0 +1,27 @@
+[package]
+name = "tgend"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-2.0-only"
+description = "Multi-port traffic generator for network device bring-up, driven over MCP"
+repository = "https://github.com/blogic/utgen"
+
+[dependencies]
+anyhow = "1.0.105"
+axum = "0.8.9"
+clap = { version = "4.6.10", features = ["derive"] }
+libc = "0.2.191"
+rand = "0.10.4"
+rmcp = { version = "3.11.0", features = ["server", "transport-streamable-http-server"] }
+schemars = "1.2.3"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+thiserror = "2.0.21"
+tokio = { version = "1.54.1", features = ["full"] }
+tokio-util = "0.7.20"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+ureq = { version = "3.5.2", features = ["json"] }
+
+[dev-dependencies]
+tempdir = "0.3.7"

@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 John Crispin <john@phrozen.org>
+
+[Unit]
+Description=traffic-generator MCP daemon
+Documentation=https://github.com/blogic/utgen
+After=network.target
+Wants=network.target
+
+[Service]
+Type=exec
+# Root, not a sandbox. The daemon creates network namespaces, moves physical
+# NICs between them, drives ethtool and opens AF_PACKET sockets, so every
+# meaningful restriction would have to be lifted again.
+User=root
+Environment=TGEN_CONFIG=/etc/traffic-generator/config.json
+Environment=RUST_BACKTRACE=1
+ExecStart=/opt/traffic-generator/bin/tgend --log-level info
+Restart=on-failure
+RestartSec=5
+KillMode=mixed
+# trafgen forks workers into their own process group, and tcpdump, the probe
+# helpers and the echo service each run as children. Give the daemon time to
+# signal them before systemd intervenes.
+TimeoutStopSec=30
+
+StateDirectory=traffic-generator
+RuntimeDirectory=traffic-generator
+# Preserved across a restart, because lease state lives here and the namespaces
+# and NIC assignments it describes survive the daemon. Wiping it would make
+# reconcile treat a client's live endpoints as orphans and tear them down. A
+# reboot clears it, which is correct: the namespaces do not survive that either.
+RuntimeDirectoryPreserve=restart
+
+[Install]
+WantedBy=multi-user.target

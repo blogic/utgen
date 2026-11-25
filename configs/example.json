@@ -1,0 +1,44 @@
+{
+  "netns_prefix": "tgen-",
+  "runs_dir": "/var/lib/traffic-generator/runs",
+  "captures_dir": "/var/lib/traffic-generator/captures",
+  "state_dir": "/run/traffic-generator",
+  "ports": [
+    {
+      "label": "p0",
+      "iface": "enp1s0f0np0",
+      "description": "10G-T, cabled to the device WAN port"
+    },
+    {
+      "label": "p1",
+      "iface": "enp1s0f1np1",
+      "description": "10G-T, cabled to the device LAN port"
+    },
+    {
+      "label": "p2",
+      "iface": "enp1s0f2np2",
+      "description": "10G-T, spare"
+    },
+    {
+      "label": "p3",
+      "iface": "enp1s0f3np3",
+      "description": "10G-T, spare"
+    }
+  ],
+  "mcp": {
+    "host": "0.0.0.0",
+    "port": 9140,
+    "path": "/mcp",
+    "token": "REPLACE_ME: head -c 32 /dev/urandom | base64 | tr -d '=+/'",
+    "allowed_hosts": [
+      "10.0.0.5:9140",
+      "127.0.0.1:9140",
+      "localhost:9140"
+    ],
+    "allowed_origins": []
+  },
+  "web": {
+    "host": "0.0.0.0",
+    "port": 9150
+  }
+}
